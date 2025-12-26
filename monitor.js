@@ -8,7 +8,8 @@ import { OTLPMetricExporter } from '@opentelemetry/exporter-metrics-otlp-http';
 import { OTLPLogExporter } from '@opentelemetry/exporter-logs-otlp-http';
 import { PeriodicExportingMetricReader } from '@opentelemetry/sdk-metrics';
 import { SimpleLogRecordProcessor } from '@opentelemetry/sdk-logs';
-import { metrics, logs } from '@opentelemetry/api';
+import api from '@opentelemetry/api';
+const { metrics, logs } = api;
 
 dotenv.config();
 
@@ -56,25 +57,21 @@ class BalanceMonitor {
       headers: this.parseHeaders(process.env.OTEL_EXPORTER_OTLP_HEADERS),
     });
 
-    const loggerProvider = new LoggerProvider({
+    this.loggerProvider = new LoggerProvider({
       resource: new Resource({
         [SEMRESATTRS_SERVICE_NAME]: 'balance-monitor',
         [SEMRESATTRS_SERVICE_VERSION]: '1.0.0',
       }),
     });
 
-    loggerProvider.addLogRecordProcessor(new SimpleLogRecordProcessor(exporter));
-    
-    // Set the global logger provider
-    logs.setGlobalLoggerProvider(loggerProvider);
-    
-    this.logger = logs.getLogger('balance-monitor');
+    this.loggerProvider.addLogRecordProcessor(new SimpleLogRecordProcessor(exporter));
+    this.logger = this.loggerProvider.getLogger('balance-monitor');
     
     console.log('Logs initialized');
   }
 
   setupInstruments() {
-    this.balanceGauge = this.meter.createUpDownCounter('facilitator_balance', {
+    this.balanceGauge = this.meter.createObservableGauge('facilitator_balance', {
       description: 'Current balance of Pieverse facilitator',
       unit: 'eth',
     });
@@ -145,6 +142,8 @@ class BalanceMonitor {
     try {
       const balances = await this.getCurrentBalances();
       
+
+      
       this.logInfo('Starting balance check', {
         timestamp: new Date().toISOString(),
         networks: Object.keys(balances),
@@ -152,20 +151,13 @@ class BalanceMonitor {
 
       for (const [network, data] of Object.entries(balances)) {
         const currentBalance = parseFloat(data.balance);
+
         const previousBalance = this.previousBalances[network];
-
-        // Record current balance as gauge value
-        this.balanceGauge.record(currentBalance, {
-          network: network,
-          address: data.address,
-        });
-
         if (previousBalance !== undefined && previousBalance !== currentBalance) {
           this.logInfo(`Balance changed for ${network}`, {
             network: network,
             previousBalance: previousBalance,
             currentBalance: currentBalance,
-            change: currentBalance - previousBalance,
           });
           
           this.balanceChangeCount.add(1, {
@@ -175,6 +167,16 @@ class BalanceMonitor {
         
         this.previousBalances[network] = currentBalance;
       }
+
+      // Update observable gauge with latest values
+      this.balanceGauge.addCallback((observableResult) => {
+        for (const [network, data] of Object.entries(balances)) {
+          observableResult.observe(parseFloat(data.balance), {
+            network: network,
+            address: data.address,
+          });
+        }
+      });
       
       const duration = Date.now() - startTime;
       this.checkDuration.record(duration);
