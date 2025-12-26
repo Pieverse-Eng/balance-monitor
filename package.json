@@ -2,14 +2,20 @@
   "name": "balance-monitor",
   "version": "1.0.0",
   "description": "Balance monitoring service for Pieverse Facilitator",
+  "type": "module",
   "main": "monitor.js",
   "scripts": {
     "start": "node monitor.js",
     "dev": "node monitor.js"
   },
   "dependencies": {
+    "@opentelemetry/api": "^1.7.0",
+    "@opentelemetry/exporter-metrics-otlp-grpc": "^0.45.1",
+    "@opentelemetry/resources": "^1.18.1",
+    "@opentelemetry/sdk-metrics": "^1.18.1",
+    "@opentelemetry/sdk-node": "^0.45.1",
+    "@opentelemetry/semantic-conventions": "^1.18.1",
     "axios": "^1.6.0",
-    "telegraf": "^4.15.0",
     "dotenv": "^16.3.1"
   },
   "engines": {

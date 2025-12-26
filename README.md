@@ -1,27 +1,27 @@
 # Balance Monitor
 
-监控 Pieverse Facilitator 余额变化并发送 Telegram 报警的服务。
+监控 Pieverse Facilitator 余额的服务，使用 OpenTelemetry 将指标发送到 Grafana Cloud。
 
 ## 功能特性
 
 - 🔄 定时检查 facilitator.pieverse.io 的余额
-- 🚨 余额变化时发送 Telegram 报警
-- 🤖 支持 Telegram 机器人命令查询状态
+- 📊 使用 OpenTelemetry 记录指标
+- 📈 通过 Grafana Cloud 可视化和报警
 - 💾 内存存储上一次余额状态（重启后重置）
 
 ## 部署到 Railway
 
-### 1. 准备工作
+### 1. 准备 Grafana Cloud
 
-1. 创建 Telegram Bot：
-   - 与 @BotFather 对话创建新机器人
-   - 获取 `BOT TOKEN`
-
-2. 获取 Chat ID：
-   - 与你的机器人对话
-   - 发送任意消息
-   - 访问 `https://api.telegram.org/bot<YOUR_BOT_TOKEN>/getUpdates`
-   - 找到 `chat.id`
+1. 登录 Grafana Cloud
+2. 获取 Grafana API Key：
+   - 访问 Cloud Portal
+   - 进入你的 stack
+   - 选择 Security > API Keys
+   - 创建新的 API Key，选择 `MetricsPublisher` 角色
+3. 获取 OTLP Endpoint：
+   - 默认为 `https://otlp-gateway-prod-us-central-0.grafana.net:4317`
+   - 或在 Cloud Portal 的 Stack Details 中查找
 
 ### 2. 部署步骤
 
@@ -35,9 +35,8 @@
 3. 设置环境变量：
    在 Railway 的项目设置中添加：
    ```
-   TELEGRAM_BOT_TOKEN=你的机器人token
-   TELEGRAM_CHAT_ID=你的chat_id
-   NODE_ENV=production
+   OTEL_EXPORTER_OTLP_ENDPOINT=https://otlp-gateway-prod-us-central-0.grafana.net:4317
+   OTEL_EXPORTER_OTLP_HEADERS={"Authorization":"Bearer 你的 Grafana API Key"}
    ```
 
 4. 部署自动开始
@@ -57,6 +56,18 @@
 }
 ```
 
+### 4. 在 Grafana Cloud 配置报警
+
+1. 创建 Dashboard：
+   - 导入查询：`facilitator_balance` 查看余额
+   - 导入查询：`balance_change_count` 查看变化次数
+   - 导入查询：`balance_check_errors` 查看错误次数
+
+2. 创建 Alert Rule：
+   - 选择你的 dashboard
+   - 设置条件，例如：`balance_change_count > 0`
+   - 配置通知渠道（Email, Slack, PagerDuty 等）
+
 ## 本地运行
 
 ```bash
@@ -66,25 +77,41 @@ npm install
 # 复制环境变量文件
 cp .env.example .env
 
-# 编辑 .env 文件，填入你的 Telegram 配置
+# 编辑 .env 文件，填入你的 Grafana Cloud 配置
 nano .env
 
 # 启动服务
 npm start
 ```
 
-## Telegram 机器人命令
-
-- `/start` - 启动机器人
-- `/status` - 查看当前余额状态
-
 ## 环境变量
 
 | 变量名 | 描述 | 必需 |
 |--------|------|------|
-| `TELEGRAM_BOT_TOKEN` | Telegram 机器人 token | ✅ |
-| `TELEGRAM_CHAT_ID` | 接收报警的聊天 ID | ✅ |
-| `NODE_ENV` | 运行环境 | ❌ |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | Grafana OTLP endpoint | ✅ |
+| `OTEL_EXPORTER_OTLP_HEADERS` | 包含认证头信息的 JSON | ✅ |
+
+### 环境变量示例
+
+```
+OTEL_EXPORTER_OTLP_ENDPOINT=https://otlp-gateway-prod-us-central-0.grafana.net:4317
+OTEL_EXPORTER_OTLP_HEADERS={"Authorization":"Bearer glc_eyJ..."}
+```
+
+## 导出的指标
+
+### Gauge 指标
+- `facilitator_balance`: 当前余额（单位：eth）
+  - labels: `network`, `address`
+
+### Histogram 指标
+- `balance_check_duration`: 余额检查耗时（单位：ms）
+
+### Counter 指标
+- `balance_change_count`: 余额变化次数
+  - labels: `network`
+- `balance_check_errors`: 检查错误次数
+  - labels: `error`
 
 ## API 端点
 
@@ -97,6 +124,14 @@ npm start
     "bsc": {
       "address": "0x12343e649e6b2b2b77649DFAb88f103c02F3C78b",
       "balance": "0.11859444416"
+    },
+    "base": {
+      "address": "0x12343e649e6b2b2b77649DFAb88f103c02F3C78b",
+      "balance": "0.008255001578379474"
+    },
+    "monad": {
+      "address": "0xfa6b2a1FC2151197cE3242D0Ea64327b798Dbd4a",
+      "balance": "1.383368652096810146"
     }
   }
 }
