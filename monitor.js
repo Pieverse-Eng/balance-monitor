@@ -1,11 +1,14 @@
 import axios from 'axios';
 import dotenv from 'dotenv';
 import { MeterProvider } from '@opentelemetry/sdk-metrics';
+import { LoggerProvider } from '@opentelemetry/sdk-logs';
 import { Resource } from '@opentelemetry/resources';
 import { SEMRESATTRS_SERVICE_NAME, SEMRESATTRS_SERVICE_VERSION } from '@opentelemetry/semantic-conventions';
 import { OTLPMetricExporter } from '@opentelemetry/exporter-metrics-otlp-http';
+import { OTLPLogExporter } from '@opentelemetry/exporter-logs-otlp-http';
 import { PeriodicExportingMetricReader } from '@opentelemetry/sdk-metrics';
-import { metrics } from '@opentelemetry/api';
+import { SimpleLogRecordProcessor } from '@opentelemetry/sdk-logs';
+import { metrics, logs } from '@opentelemetry/api';
 
 dotenv.config();
 
@@ -14,6 +17,7 @@ class BalanceMonitor {
     this.apiUrl = 'https://facilitator.pieverse.io';
     this.previousBalances = {};
     this.meter = null;
+    this.logger = null;
     this.balanceGauge = null;
   }
 
@@ -46,6 +50,29 @@ class BalanceMonitor {
     console.log('Metrics initialized');
   }
 
+  async setupLogs() {
+    const exporter = new OTLPLogExporter({
+      url: process.env.OTEL_EXPORTER_OTLP_ENDPOINT + '/v1/logs',
+      headers: this.parseHeaders(process.env.OTEL_EXPORTER_OTLP_HEADERS),
+    });
+
+    const loggerProvider = new LoggerProvider({
+      resource: new Resource({
+        [SEMRESATTRS_SERVICE_NAME]: 'balance-monitor',
+        [SEMRESATTRS_SERVICE_VERSION]: '1.0.0',
+      }),
+    });
+
+    loggerProvider.addLogRecordProcessor(new SimpleLogRecordProcessor(exporter));
+    
+    // Set the global logger provider
+    logs.setGlobalLoggerProvider(loggerProvider);
+    
+    this.logger = logs.getLogger('balance-monitor');
+    
+    console.log('Logs initialized');
+  }
+
   setupInstruments() {
     this.balanceGauge = this.meter.createUpDownCounter('facilitator_balance', {
       description: 'Current balance of Pieverse facilitator',
@@ -63,6 +90,30 @@ class BalanceMonitor {
 
     this.checkErrors = this.meter.createCounter('balance_check_errors', {
       description: 'Number of errors during balance checks',
+    });
+  }
+
+  logInfo(message, attributes = {}) {
+    console.log(message);
+    this.logger.emit({
+      severity: 'INFO',
+      body: message,
+      attributes: attributes,
+      timestamp: Date.now(),
+    });
+  }
+
+  logError(message, error, attributes = {}) {
+    console.error(message, error);
+    this.logger.emit({
+      severity: 'ERROR',
+      body: message,
+      attributes: {
+        ...attributes,
+        error: error.message,
+        stack: error.stack,
+      },
+      timestamp: Date.now(),
     });
   }
 
@@ -94,6 +145,11 @@ class BalanceMonitor {
     try {
       const balances = await this.getCurrentBalances();
       
+      this.logInfo('Starting balance check', {
+        timestamp: new Date().toISOString(),
+        networks: Object.keys(balances),
+      });
+
       for (const [network, data] of Object.entries(balances)) {
         const currentBalance = parseFloat(data.balance);
         const previousBalance = this.previousBalances[network];
@@ -105,7 +161,12 @@ class BalanceMonitor {
         });
 
         if (previousBalance !== undefined && previousBalance !== currentBalance) {
-          console.log(`Balance changed for ${network}: ${previousBalance} -> ${currentBalance}`);
+          this.logInfo(`Balance changed for ${network}`, {
+            network: network,
+            previousBalance: previousBalance,
+            currentBalance: currentBalance,
+            change: currentBalance - previousBalance,
+          });
           
           this.balanceChangeCount.add(1, {
             network: network,
@@ -118,9 +179,15 @@ class BalanceMonitor {
       const duration = Date.now() - startTime;
       this.checkDuration.record(duration);
       
-      console.log(`Balance check completed at ${new Date().toISOString()}, took ${duration}ms`);
+      this.logInfo(`Balance check completed`, {
+        timestamp: new Date().toISOString(),
+        duration: duration,
+        networksChecked: Object.keys(balances).length,
+      });
     } catch (error) {
-      console.error('Error in balance check:', error.message);
+      this.logError('Error in balance check', error, {
+        timestamp: new Date().toISOString(),
+      });
     }
   }
 
@@ -137,6 +204,7 @@ class BalanceMonitor {
 
 const monitor = new BalanceMonitor();
 await monitor.setupMetrics();
+await monitor.setupLogs();
 
 const isCronMode = process.argv.includes('--once');
 
