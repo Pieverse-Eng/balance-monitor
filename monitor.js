@@ -6,6 +6,7 @@ import { SEMRESATTRS_SERVICE_NAME, SEMRESATTRS_SERVICE_VERSION } from '@opentele
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import { OTLPMetricExporter } from '@opentelemetry/exporter-metrics-otlp-http';
 import { PeriodicExportingMetricReader } from '@opentelemetry/sdk-metrics';
+import { metrics } from '@opentelemetry/api';
 
 dotenv.config();
 
@@ -37,7 +38,9 @@ class BalanceMonitor {
     });
 
     await sdk.start();
-    this.meter = sdk.getMeterProvider().getMeter('balance-monitor');
+    
+    // Get the meter provider from the global API
+    this.meter = metrics.getMeterProvider().getMeter('balance-monitor');
     this.setupMetrics();
     console.log('OpenTelemetry initialized');
   }
