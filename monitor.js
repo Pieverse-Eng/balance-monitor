@@ -16,6 +16,20 @@ class BalanceMonitor {
     this.balanceGauge = null;
   }
 
+  parseHeaders(headersString) {
+    if (!headersString) return {};
+    
+    const headers = {};
+    const pairs = headersString.split(',');
+    for (const pair of pairs) {
+      const [key, ...valueParts] = pair.split('=');
+      if (key && valueParts.length > 0) {
+        headers[key.trim()] = decodeURIComponent(valueParts.join('=').trim());
+      }
+    }
+    return headers;
+  }
+
   async setupOpenTelemetry() {
     const resource = Resource.default().merge(
       new Resource({
@@ -26,7 +40,7 @@ class BalanceMonitor {
 
     const exporter = new OTLPMetricExporter({
       url: process.env.OTEL_EXPORTER_OTLP_ENDPOINT,
-      headers: process.env.OTEL_EXPORTER_OTLP_HEADERS ? JSON.parse(process.env.OTEL_EXPORTER_OTLP_HEADERS) : {},
+      headers: this.parseHeaders(process.env.OTEL_EXPORTER_OTLP_HEADERS),
     });
 
     const metricReader = new PeriodicExportingMetricReader({
