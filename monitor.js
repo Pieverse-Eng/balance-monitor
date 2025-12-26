@@ -1,9 +1,8 @@
 import axios from 'axios';
 import dotenv from 'dotenv';
-import { NodeSDK } from '@opentelemetry/sdk-node';
+import { MeterProvider } from '@opentelemetry/sdk-metrics';
 import { Resource } from '@opentelemetry/resources';
 import { SEMRESATTRS_SERVICE_NAME, SEMRESATTRS_SERVICE_VERSION } from '@opentelemetry/semantic-conventions';
-import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import { OTLPMetricExporter } from '@opentelemetry/exporter-metrics-otlp-http';
 import { PeriodicExportingMetricReader } from '@opentelemetry/sdk-metrics';
 import { metrics } from '@opentelemetry/api';
@@ -18,20 +17,53 @@ class BalanceMonitor {
     this.balanceGauge = null;
   }
 
-  async setupOpenTelemetry() {
-    const sdk = new NodeSDK({
+  async setupMetrics() {
+    const exporter = new OTLPMetricExporter({
+      url: process.env.OTEL_EXPORTER_OTLP_ENDPOINT + '/v1/metrics',
+      headers: this.parseHeaders(process.env.OTEL_EXPORTER_OTLP_HEADERS),
+    });
+
+    const meterProvider = new MeterProvider({
       resource: new Resource({
         [SEMRESATTRS_SERVICE_NAME]: 'balance-monitor',
         [SEMRESATTRS_SERVICE_VERSION]: '1.0.0',
       }),
-      traceExporter: new OTLPTraceExporter({
-        url: process.env.OTEL_EXPORTER_OTLP_ENDPOINT + '/v1/traces',
-        headers: this.parseHeaders(process.env.OTEL_EXPORTER_OTLP_HEADERS),
-      }),
     });
 
-    await sdk.start();
-    console.log('OpenTelemetry initialized (traces only)');
+    const metricReader = new PeriodicExportingMetricReader({
+      exporter: exporter,
+      exportIntervalMillis: 10000,
+    });
+
+    meterProvider.addMetricReader(metricReader);
+    
+    // Set the global meter provider
+    metrics.setGlobalMeterProvider(meterProvider);
+    
+    this.meter = metrics.getMeter('balance-monitor');
+    this.setupInstruments();
+    
+    console.log('Metrics initialized');
+  }
+
+  setupInstruments() {
+    this.balanceGauge = this.meter.createUpDownCounter('facilitator_balance', {
+      description: 'Current balance of Pieverse facilitator',
+      unit: 'eth',
+    });
+
+    this.checkDuration = this.meter.createHistogram('balance_check_duration', {
+      description: 'Duration of balance check',
+      unit: 'ms',
+    });
+
+    this.balanceChangeCount = this.meter.createCounter('balance_change_count', {
+      description: 'Number of balance changes detected',
+    });
+
+    this.checkErrors = this.meter.createCounter('balance_check_errors', {
+      description: 'Number of errors during balance checks',
+    });
   }
 
   parseHeaders(headersString) {
@@ -44,11 +76,6 @@ class BalanceMonitor {
       }
     });
     return headers;
-  }
-
-  setupMetrics() {
-    // Metrics temporarily disabled - using traces only
-    console.log('Metrics setup skipped');
   }
 
   async getCurrentBalances() {
@@ -71,18 +98,25 @@ class BalanceMonitor {
         const currentBalance = parseFloat(data.balance);
         const previousBalance = this.previousBalances[network];
 
-        // Observable gauge handles updates differently
+        // Record current balance as gauge value
+        this.balanceGauge.record(currentBalance, {
+          network: network,
+          address: data.address,
+        });
 
         if (previousBalance !== undefined && previousBalance !== currentBalance) {
           console.log(`Balance changed for ${network}: ${previousBalance} -> ${currentBalance}`);
           
-          // Balance change detected
+          this.balanceChangeCount.add(1, {
+            network: network,
+          });
         }
         
         this.previousBalances[network] = currentBalance;
       }
       
       const duration = Date.now() - startTime;
+      this.checkDuration.record(duration);
       
       console.log(`Balance check completed at ${new Date().toISOString()}, took ${duration}ms`);
     } catch (error) {
@@ -102,7 +136,7 @@ class BalanceMonitor {
 }
 
 const monitor = new BalanceMonitor();
-await monitor.setupOpenTelemetry();
+await monitor.setupMetrics();
 
 const isCronMode = process.argv.includes('--once');
 
