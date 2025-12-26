@@ -1,10 +1,8 @@
 import axios from 'axios';
 import dotenv from 'dotenv';
-import { MeterProvider, PeriodicExportingMetricReader } from '@opentelemetry/sdk-metrics';
 import { NodeSDK } from '@opentelemetry/sdk-node';
 import { Resource } from '@opentelemetry/resources';
 import { SEMRESATTRS_SERVICE_NAME, SEMRESATTRS_SERVICE_VERSION } from '@opentelemetry/semantic-conventions';
-import { OTLPMetricExporter } from '@opentelemetry/exporter-metrics-otlp-grpc';
 
 dotenv.config();
 
@@ -16,53 +14,17 @@ class BalanceMonitor {
     this.balanceGauge = null;
   }
 
-  parseHeaders(headersString) {
-    if (!headersString) return {};
-    
-    const headers = {};
-    const pairs = headersString.split(',');
-    for (const pair of pairs) {
-      const [key, ...valueParts] = pair.split('=');
-      if (key && valueParts.length > 0) {
-        headers[key.trim()] = decodeURIComponent(valueParts.join('=').trim());
-      }
-    }
-    return headers;
-  }
-
   async setupOpenTelemetry() {
-    const resource = Resource.default().merge(
-      new Resource({
+    const sdk = new NodeSDK({
+      resource: new Resource({
         [SEMRESATTRS_SERVICE_NAME]: 'balance-monitor',
         [SEMRESATTRS_SERVICE_VERSION]: '1.0.0',
-      })
-    );
-
-    const exporter = new OTLPMetricExporter({
-      url: process.env.OTEL_EXPORTER_OTLP_ENDPOINT,
-      headers: this.parseHeaders(process.env.OTEL_EXPORTER_OTLP_HEADERS),
-    });
-
-    const metricReader = new PeriodicExportingMetricReader({
-      exporter: exporter,
-      exportIntervalMillis: 60000,
-    });
-
-    const meterProvider = new MeterProvider({
-      resource: resource,
-    });
-
-    meterProvider.addMetricReader(metricReader);
-    this.meter = meterProvider.getMeter('balance-monitor');
-
-    this.setupMetrics();
-
-    const sdk = new NodeSDK({
-      resource: resource,
-      metricReader: metricReader,
+      }),
     });
 
     await sdk.start();
+    this.meter = sdk.getMeterProvider().getMeter('balance-monitor');
+    this.setupMetrics();
     console.log('OpenTelemetry initialized');
   }
 
