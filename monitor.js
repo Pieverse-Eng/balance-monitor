@@ -28,21 +28,10 @@ class BalanceMonitor {
         url: process.env.OTEL_EXPORTER_OTLP_ENDPOINT + '/v1/traces',
         headers: this.parseHeaders(process.env.OTEL_EXPORTER_OTLP_HEADERS),
       }),
-      metricReader: new PeriodicExportingMetricReader({
-        exporter: new OTLPMetricExporter({
-          url: process.env.OTEL_EXPORTER_OTLP_ENDPOINT + '/v1/metrics',
-          headers: this.parseHeaders(process.env.OTEL_EXPORTER_OTLP_HEADERS),
-        }),
-        exportIntervalMillis: 10000,
-      }),
     });
 
     await sdk.start();
-    
-    // Get the meter provider from the global API
-    this.meter = metrics.getMeterProvider().getMeter('balance-monitor');
-    this.setupMetrics();
-    console.log('OpenTelemetry initialized');
+    console.log('OpenTelemetry initialized (traces only)');
   }
 
   parseHeaders(headersString) {
@@ -58,23 +47,8 @@ class BalanceMonitor {
   }
 
   setupMetrics() {
-    this.balanceGauge = this.meter.createGauge('facilitator_balance', {
-      description: 'Current balance of Pieverse facilitator',
-      unit: 'eth',
-    });
-
-    this.checkDuration = this.meter.createHistogram('balance_check_duration', {
-      description: 'Duration of balance check',
-      unit: 'ms',
-    });
-
-    this.balanceChangeCount = this.meter.createCounter('balance_change_count', {
-      description: 'Number of balance changes detected',
-    });
-
-    this.checkErrors = this.meter.createCounter('balance_check_errors', {
-      description: 'Number of errors during balance checks',
-    });
+    // Metrics temporarily disabled - using traces only
+    console.log('Metrics setup skipped');
   }
 
   async getCurrentBalances() {
@@ -97,31 +71,22 @@ class BalanceMonitor {
         const currentBalance = parseFloat(data.balance);
         const previousBalance = this.previousBalances[network];
 
-        this.balanceGauge.record(currentBalance, {
-          network: network,
-          address: data.address,
-        });
+        // Observable gauge handles updates differently
 
         if (previousBalance !== undefined && previousBalance !== currentBalance) {
           console.log(`Balance changed for ${network}: ${previousBalance} -> ${currentBalance}`);
           
-          this.balanceChangeCount.add(1, {
-            network: network,
-          });
+          // Balance change detected
         }
         
         this.previousBalances[network] = currentBalance;
       }
       
       const duration = Date.now() - startTime;
-      this.checkDuration.record(duration);
       
       console.log(`Balance check completed at ${new Date().toISOString()}, took ${duration}ms`);
     } catch (error) {
       console.error('Error in balance check:', error.message);
-      this.checkErrors.add(1, {
-        error: error.message,
-      });
     }
   }
 
