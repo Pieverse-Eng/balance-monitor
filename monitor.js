@@ -3,6 +3,9 @@ import dotenv from 'dotenv';
 import { NodeSDK } from '@opentelemetry/sdk-node';
 import { Resource } from '@opentelemetry/resources';
 import { SEMRESATTRS_SERVICE_NAME, SEMRESATTRS_SERVICE_VERSION } from '@opentelemetry/semantic-conventions';
+import { OTLPTraceExporter } from '@opentelemetry/exporter-otlp-http';
+import { OTLPMetricExporter } from '@opentelemetry/exporter-otlp-http';
+import { PeriodicExportingMetricReader } from '@opentelemetry/sdk-metrics';
 
 dotenv.config();
 
@@ -20,12 +23,35 @@ class BalanceMonitor {
         [SEMRESATTRS_SERVICE_NAME]: 'balance-monitor',
         [SEMRESATTRS_SERVICE_VERSION]: '1.0.0',
       }),
+      traceExporter: new OTLPTraceExporter({
+        url: process.env.OTEL_EXPORTER_OTLP_ENDPOINT + '/v1/traces',
+        headers: this.parseHeaders(process.env.OTEL_EXPORTER_OTLP_HEADERS),
+      }),
+      metricReader: new PeriodicExportingMetricReader({
+        exporter: new OTLPMetricExporter({
+          url: process.env.OTEL_EXPORTER_OTLP_ENDPOINT + '/v1/metrics',
+          headers: this.parseHeaders(process.env.OTEL_EXPORTER_OTLP_HEADERS),
+        }),
+        exportIntervalMillis: 10000,
+      }),
     });
 
     await sdk.start();
     this.meter = sdk.getMeterProvider().getMeter('balance-monitor');
     this.setupMetrics();
     console.log('OpenTelemetry initialized');
+  }
+
+  parseHeaders(headersString) {
+    if (!headersString) return {};
+    const headers = {};
+    headersString.split('&').forEach(pair => {
+      const [key, value] = pair.split('=');
+      if (key && value) {
+        headers[decodeURIComponent(key)] = decodeURIComponent(value);
+      }
+    });
+    return headers;
   }
 
   setupMetrics() {
