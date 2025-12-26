@@ -6,7 +6,8 @@
   "main": "monitor.js",
   "scripts": {
     "start": "node monitor.js",
-    "dev": "node monitor.js"
+    "dev": "node monitor.js",
+    "cron": "node monitor.js --once"
   },
   "dependencies": {
     "@opentelemetry/api": "^1.7.0",

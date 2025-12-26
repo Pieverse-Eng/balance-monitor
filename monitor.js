@@ -135,7 +135,17 @@ class BalanceMonitor {
 
 const monitor = new BalanceMonitor();
 await monitor.setupOpenTelemetry();
-monitor.startMonitoring(5);
+
+const isCronMode = process.argv.includes('--once');
+
+if (isCronMode) {
+  console.log('Running in cron mode - checking once...');
+  await monitor.checkAndRecord();
+  console.log('Cron check completed');
+  process.exit(0);
+} else {
+  monitor.startMonitoring(5);
+}
 
 process.on('SIGINT', async () => {
   console.log('Shutting down gracefully...');
